@@ -1,0 +1,86 @@
+config:
+  theme: tokyo-night          # tokyo-night | dracula | catppuccin-mocha | gruvbox | nord
+  font_family: "JetBrains Mono, Fira Code, monospace"
+  font_size: 16
+  width: 1920
+  height: 1080
+  fps: 30
+  padding: 52
+  typewriter_wpm: 260
+  pause_after_command: 0.7
+  window_title: "demo"
+
+scenes:
+  - type: title
+    text: "termcast demo"
+    subtitle: "high-res terminal recordings"
+    duration: 2.0
+
+  - type: shell
+    prompt_user: alice
+    prompt_host: dev
+    prompt_path: "~/projects/demo"
+    commands:
+      - input: "ls -la"
+        output: |
+          total 48
+          drwxr-xr-x  6 alice staff  192 Apr 19 10:22 .
+          drwxr-xr-x 12 alice staff  384 Apr 18 09:01 ..
+          -rw-r--r--  1 alice staff 1.2K Apr 19 10:22 README.md
+          -rw-r--r--  1 alice staff 4.5K Apr 19 10:20 train.py
+          drwxr-xr-x  4 alice staff  128 Apr 17 14:30 data
+
+      - input: "python train.py --epochs 5 --lr 0.001"
+        output: |
+          Loading dataset... 60000 samples
+          Epoch 1/5: loss=0.8421  acc=0.7134
+          Epoch 2/5: loss=0.6103  acc=0.8012
+          Epoch 3/5: loss=0.4872  acc=0.8541
+          Epoch 4/5: loss=0.3901  acc=0.8830
+          Epoch 5/5: loss=0.3211  acc=0.9012
+          Saved model to ./checkpoints/model.pt
+        delay_after: 1.5
+
+  - type: repl
+    repl: python
+    title: "Python 3.12"
+    commands:
+      - input: "import torch"
+      - input: "x = torch.randn(4, 4)"
+      - input: "x.shape"
+        output: "torch.Size([4, 4])"
+      - input: "x.mean().item()"
+        output: "0.12345670163631439"
+
+  - type: editor
+    mode: vim
+    filename: "train.py"
+    lang: python
+    vim_mode: NORMAL
+    duration: 3.5
+    highlight_lines: [12, 13, 14]
+    content: |
+      import torch
+      import torch.nn as nn
+      from torch.utils.data import DataLoader
+
+      class SimpleNet(nn.Module):
+          def __init__(self, input_dim, hidden, output_dim):
+              super().__init__()
+              self.layers = nn.Sequential(
+                  nn.Linear(input_dim, hidden),
+                  nn.ReLU(),
+                  nn.Linear(hidden, output_dim)
+              )
+
+          def forward(self, x):
+              return self.layers(x)
+
+      def train(model, loader, optimizer, criterion):
+          model.train()
+          for batch_x, batch_y in loader:
+              optimizer.zero_grad()
+              loss = criterion(model(batch_x), batch_y)
+              loss.backward()
+              optimizer.step()
+

@@ -1,0 +1,294 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-mono); }
+
+  #app { padding: 1rem 0; }
+
+  .toolbar {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .toolbar button {
+    font-size: 13px; padding: 6px 14px; border-radius: var(--border-radius-md);
+    border: 0.5px solid var(--color-border-secondary); background: var(--color-background-primary);
+    color: var(--color-text-primary); cursor: pointer; font-family: var(--font-sans);
+  }
+  .toolbar button:hover { background: var(--color-background-secondary); }
+  .toolbar button.active { background: #1D9E75; color: #fff; border-color: #1D9E75; }
+  .toolbar button.danger { border-color: #E24B4A; color: #E24B4A; }
+  .toolbar button.danger:hover { background: #FCEBEB; }
+
+  #terminal {
+    background: #1a1b26; border-radius: var(--border-radius-lg);
+    border: 0.5px solid #2a2b3d; overflow: hidden;
+  }
+  .term-header {
+    background: #13141f; padding: 8px 14px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 0.5px solid #2a2b3d;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #E24B4A; } .dot.y { background: #EF9F27; } .dot.g { background: #1D9E75; }
+  .term-title { font-family: var(--font-sans); font-size: 12px; color: #666; margin-left: auto; margin-right: auto; }
+
+  #output {
+    padding: 14px 16px; min-height: 220px; max-height: 360px; overflow-y: auto;
+    font-size: 13.5px; line-height: 1.7; color: #cdd6f4;
+  }
+
+  .line { display: flex; gap: 0; }
+  .prompt-sym { color: #1D9E75; white-space: pre; }
+  .cmd-text { color: #cdd6f4; white-space: pre-wrap; word-break: break-all; }
+  .output-text { color: #a9b1d6; white-space: pre-wrap; word-break: break-all; padding-left: 0; }
+  .ts { color: #3d4166; font-size: 11px; margin-right: 8px; user-select: none; }
+
+  .kw { color: #bb9af7; } .str { color: #9ece6a; } .flag { color: #7aa2f7; }
+  .num { color: #ff9e64; } .comment { color: #565f89; font-style: italic; }
+  .path { color: #e0af68; } .pipe { color: #f7768e; }
+
+  .input-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px 14px; border-top: 0.5px solid #2a2b3d;
+  }
+  .ps1 { color: #1D9E75; font-size: 13.5px; white-space: pre; flex-shrink: 0; }
+  #cmd-input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: #cdd6f4; font-family: var(--font-mono); font-size: 13.5px; caret-color: #cdd6f4;
+  }
+
+  #replay-bar {
+    display: none; gap: 10px; align-items: center; margin-top: 12px;
+    background: var(--color-background-secondary); padding: 10px 14px;
+    border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-tertiary);
+  }
+  #replay-bar.visible { display: flex; }
+  #replay-bar label { font-family: var(--font-sans); font-size: 13px; color: var(--color-text-secondary); white-space: nowrap; }
+  #speed-slider { flex: 1; max-width: 120px; }
+  #replay-progress { font-family: var(--font-sans); font-size: 12px; color: var(--color-text-secondary); margin-left: auto; }
+
+  .badge {
+    display: inline-block; font-family: var(--font-sans); font-size: 11px; padding: 2px 8px;
+    border-radius: var(--border-radius-md); margin-left: 6px;
+  }
+  .badge-rec { background: #FCEBEB; color: #A32D2D; }
+  .badge-done { background: #EAF3DE; color: #3B6D11; }
+
+  #export-area {
+    display: none; margin-top: 12px;
+  }
+  #export-area.visible { display: block; }
+  #export-area textarea {
+    width: 100%; height: 120px; font-family: var(--font-mono); font-size: 12px;
+    background: var(--color-background-secondary); color: var(--color-text-primary);
+    border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md);
+    padding: 10px; resize: vertical;
+  }
+</style>
+
+<div id="app">
+  <h2 class="sr-only">Terminal session recorder — record commands and replay them with syntax highlighting</h2>
+
+  <div class="toolbar">
+    <button id="btn-rec">● Record</button>
+    <button id="btn-replay" disabled>▶ Replay</button>
+    <button id="btn-clear" class="danger">✕ Clear</button>
+    <button id="btn-export">↓ Export JSON</button>
+    <span id="status-badge"></span>
+  </div>
+
+  <div id="terminal">
+    <div class="term-header">
+      <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+      <div class="term-title">session recorder</div>
+    </div>
+    <div id="output"></div>
+    <div class="input-row">
+      <span class="ps1">user@host:~$ </span>
+      <input id="cmd-input" type="text" placeholder="type a command and press Enter…" autocomplete="off" spellcheck="false" />
+    </div>
+  </div>
+
+  <div id="replay-bar">
+    <label>Speed</label>
+    <input type="range" id="speed-slider" min="1" max="5" value="2" step="1" />
+    <label id="speed-label">1×</label>
+    <span id="replay-progress"></span>
+  </div>
+
+  <div id="export-area">
+    <textarea id="export-text" readonly></textarea>
+  </div>
+</div>
+
+<script>
+const SPEEDS = [0.5, 1, 1.5, 2, 4];
+const SPEED_LABELS = ['0.5×','1×','1.5×','2×','4×'];
+
+let session = [];
+let recording = false;
+let replaying = false;
+
+const output = document.getElementById('output');
+const cmdInput = document.getElementById('cmd-input');
+const btnRec = document.getElementById('btn-rec');
+const btnReplay = document.getElementById('btn-replay');
+const btnClear = document.getElementById('btn-clear');
+const btnExport = document.getElementById('btn-export');
+const statusBadge = document.getElementById('status-badge');
+const replayBar = document.getElementById('replay-bar');
+const speedSlider = document.getElementById('speed-slider');
+const speedLabel = document.getElementById('speed-label');
+const replayProgress = document.getElementById('replay-progress');
+const exportArea = document.getElementById('export-area');
+const exportText = document.getElementById('export-text');
+
+speedSlider.addEventListener('input', () => {
+  speedLabel.textContent = SPEED_LABELS[parseInt(speedSlider.value) - 1];
+});
+
+function highlight(cmd) {
+  const tokens = cmd.split(/(\s+)/);
+  return tokens.map((t, i) => {
+    if (i === 0) {
+      const cmds = ['ls','cd','grep','find','cat','echo','git','npm','pip','python','python3','node','curl','wget','mkdir','rm','cp','mv','chmod','sudo','ssh','docker','make','export','source','bash','sh','awk','sed','sort','uniq','wc','head','tail','ps','kill','top','htop','which','man'];
+      if (cmds.includes(t)) return `<span class="kw">${t}</span>`;
+    }
+    if (t.startsWith('-')) return `<span class="flag">${t}</span>`;
+    if (/^['"]/.test(t) || /['"]$/.test(t)) return `<span class="str">${t}</span>`;
+    if (/^\d+(\.\d+)?$/.test(t)) return `<span class="num">${t}</span>`;
+    if (t === '|' || t === '>' || t === '>>' || t === '<') return `<span class="pipe">${t}</span>`;
+    if (t.startsWith('#')) return `<span class="comment">${t}</span>`;
+    if (t.includes('/') && !t.startsWith('-')) return `<span class="path">${t}</span>`;
+    return t;
+  }).join('');
+}
+
+function fakeOutput(cmd) {
+  const map = {
+    'ls': 'Desktop  Documents  Downloads  Music  Pictures\nprojects  README.md  notes.txt',
+    'ls -la': 'total 48\ndrwxr-xr-x  8 user group 256 Apr 19 10:22 .\ndrwxr-xr-x 12 user group 384 Apr 18 09:01 ..\n-rw-r--r--  1 user group 1.2K Apr 19 10:22 README.md\ndrwxr-xr-x  5 user group 160 Apr 17 14:30 projects',
+    'pwd': '/home/user',
+    'whoami': 'user',
+    'date': new Date().toString(),
+    'echo hello': 'hello',
+    'uname -a': 'Linux host 5.15.0-91-generic #101-Ubuntu SMP x86_64 GNU/Linux',
+    'ps aux': 'USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\nuser      1234  0.0  0.1  12345  4567 pts/0    Ss   10:00   0:00 bash',
+  };
+  const lower = cmd.trim().toLowerCase();
+  if (map[lower]) return map[lower];
+  if (lower.startsWith('git ')) return 'On branch main\nYour branch is up to date with \'origin/main\'.\nnothing to commit, working tree clean';
+  if (lower.startsWith('echo ')) return cmd.slice(5).replace(/['"]/g, '');
+  if (lower.startsWith('mkdir ')) return '';
+  if (lower.startsWith('cd ')) return '';
+  if (lower.startsWith('cat ')) return '# sample file content\nline 1\nline 2\nline 3';
+  return `bash: ${cmd.split(' ')[0]}: command not found`;
+}
+
+function appendEntry(entry, animate) {
+  const t0 = session.length > 0 ? (entry.time - session[0].time) / 1000 : 0;
+  const ts = t0.toFixed(1) + 's';
+
+  const cmdLine = document.createElement('div');
+  cmdLine.className = 'line';
+  cmdLine.innerHTML = `<span class="ts">[${ts}]</span><span class="prompt-sym">$ </span><span class="cmd-text">${highlight(entry.cmd)}</span>`;
+  output.appendChild(cmdLine);
+
+  if (entry.out) {
+    const outLine = document.createElement('div');
+    outLine.className = 'output-text';
+    outLine.textContent = entry.out;
+    output.appendChild(outLine);
+  }
+
+  const sep = document.createElement('div');
+  sep.style.cssText = 'height:4px';
+  output.appendChild(sep);
+
+  output.scrollTop = output.scrollHeight;
+}
+
+cmdInput.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const cmd = cmdInput.value.trim();
+  if (!cmd) return;
+  cmdInput.value = '';
+
+  const out = fakeOutput(cmd);
+  const entry = { cmd, out, time: Date.now() };
+
+  if (recording) {
+    session.push(entry);
+    statusBadge.innerHTML = `<span class="badge badge-rec">● REC — ${session.length} cmd${session.length > 1 ? 's' : ''}</span>`;
+  }
+
+  appendEntry(entry, false);
+});
+
+btnRec.addEventListener('click', () => {
+  if (replaying) return;
+  recording = !recording;
+  if (recording) {
+    session = [];
+    output.innerHTML = '';
+    btnRec.textContent = '■ Stop';
+    btnRec.classList.add('active');
+    btnReplay.disabled = true;
+    statusBadge.innerHTML = `<span class="badge badge-rec">● REC</span>`;
+    cmdInput.focus();
+    exportArea.classList.remove('visible');
+  } else {
+    btnRec.textContent = '● Record';
+    btnRec.classList.remove('active');
+    if (session.length > 0) {
+      btnReplay.disabled = false;
+      statusBadge.innerHTML = `<span class="badge badge-done">✓ ${session.length} cmd${session.length > 1 ? 's' : ''} saved</span>`;
+      replayBar.classList.add('visible');
+    } else {
+      statusBadge.innerHTML = '';
+    }
+  }
+});
+
+btnReplay.addEventListener('click', async () => {
+  if (replaying || recording || session.length === 0) return;
+  replaying = true;
+  btnReplay.disabled = true;
+  btnRec.disabled = true;
+  output.innerHTML = '';
+
+  const speed = SPEEDS[parseInt(speedSlider.value) - 1];
+
+  for (let i = 0; i < session.length; i++) {
+    const entry = session[i];
+    replayProgress.textContent = `${i + 1} / ${session.length}`;
+
+    const delay = i === 0 ? 400 : (session[i].time - session[i - 1].time) / speed;
+    await new Promise(r => setTimeout(r, Math.min(delay, 3000)));
+
+    appendEntry(entry, true);
+  }
+
+  replayProgress.textContent = 'done';
+  replaying = false;
+  btnReplay.disabled = false;
+  btnRec.disabled = false;
+});
+
+btnClear.addEventListener('click', () => {
+  if (replaying) return;
+  session = [];
+  output.innerHTML = '';
+  btnReplay.disabled = true;
+  statusBadge.innerHTML = '';
+  replayBar.classList.remove('visible');
+  exportArea.classList.remove('visible');
+  recording = false;
+  btnRec.textContent = '● Record';
+  btnRec.classList.remove('active');
+});
+
+btnExport.addEventListener('click', () => {
+  if (session.length === 0) return;
+  exportText.value = JSON.stringify(session, null, 2);
+  exportArea.classList.toggle('visible');
+});
+</script>

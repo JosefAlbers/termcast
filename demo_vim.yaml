@@ -1,0 +1,711 @@
+# demo_vim.yaml
+#
+# A full vim editing session demo showcasing:
+#   - Long files that don't fit in one screen
+#   - Scrolling through the file (start_line simulation)
+#   - Text wrapping on long lines
+#   - NORMAL / INSERT / VISUAL / COMMAND modes
+#   - Keypress popups via the shell "keystroke" trick
+#   - Split pane layout (editor + shell side by side)
+#   - Multiple themes across scenes
+#
+# Usage:
+#   python termcast.py preview demo_vim.yaml --scene 0
+#   python termcast.py render  demo_vim.yaml -o vim_demo.mp4
+
+config:
+  theme: tokyo-night
+  font_family: "JetBrains Mono, Fira Code, monospace"
+  font_size: 15
+  width: 1440
+  height: 900
+  fps: 30
+  padding: 44
+  terminal_padding: 18
+  typewriter_wpm: 320
+  pause_after_command: 0.5
+  pause_between_scenes: 0.8
+  window_title: "vim demo"
+
+# ── YAML anchor: the long Python file used across all editor scenes ─────────
+# (Paste it once, reference it everywhere with *src)
+
+scenes:
+
+  # ── 0. Title card ─────────────────────────────────────────────────────────
+  - type: title
+    text: "vim in termcast"
+    subtitle: "scrolling · modes · keypresses · split panes"
+    duration: 2.2
+    pause_after: 0.4
+
+  # ── 1. Open the file from the shell ───────────────────────────────────────
+  - type: shell
+    prompt_user: dev
+    prompt_host: box
+    prompt_path: "~/projects/api"
+    commands:
+      - input: "cat server.py | wc -l"
+        output: "      87"
+      - input: "vim server.py"
+        output: ""
+        delay_after: 0.3
+
+  # ── 2. vim opens — top of the file, NORMAL mode ───────────────────────────
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 1
+    duration: 1.8
+    pause_after: 0.0
+    content: &server |
+      #!/usr/bin/env python3
+      """
+      Minimal async HTTP API server.
+      Handles /health, /users, and /users/<id> routes.
+      Long lines ahead to demonstrate text wrapping in the editor viewport.
+      """
+      from __future__ import annotations
+
+      import asyncio
+      import json
+      import logging
+      import os
+      import time
+      from dataclasses import dataclass, field, asdict
+      from typing import Any, Optional
+      from http.server import BaseHTTPRequestHandler, HTTPServer
+      from socketserver import ThreadingMixIn
+
+      logger = logging.getLogger(__name__)
+      logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+      # ── Data layer ────────────────────────────────────────────────────────────────────────────────────────────
+      # In production you'd replace these in-memory stores with a real database connection (Postgres, SQLite, etc.)
+
+      @dataclass
+      class User:
+          id: int
+          name: str
+          email: str
+          role: str = "member"
+          created_at: float = field(default_factory=time.time)
+          active: bool = True
+
+          def to_dict(self) -> dict[str, Any]:
+              return asdict(self)
+
+      _users: dict[int, User] = {
+          1: User(id=1, name="Alice Nakamura",  email="alice@example.com",  role="admin"),
+          2: User(id=2, name="Bob Osei-Bonsu",  email="bob@example.com",    role="member"),
+          3: User(id=3, name="Carol Reyes",     email="carol@example.com",  role="member"),
+          4: User(id=4, name="Dave Petrov",     email="dave@example.com",   role="member"),
+      }
+      _next_id: int = 5
+
+      # ── Request handler ───────────────────────────────────────────────────────────────────────────────────────
+
+      class APIHandler(BaseHTTPRequestHandler):
+          """Handle incoming HTTP requests and route them to the correct method."""
+
+          def log_message(self, fmt: str, *args: Any) -> None:  # silence default httpd logging
+              logger.info(fmt % args)
+
+          def send_json(self, status: int, data: Any) -> None:
+              body = json.dumps(data, indent=2).encode()
+              self.send_response(status)
+              self.send_header("Content-Type", "application/json")
+              self.send_header("Content-Length", str(len(body)))
+              self.end_headers()
+              self.wfile.write(body)
+
+          def do_GET(self) -> None:
+              if self.path == "/health":
+                  self.send_json(200, {"status": "ok", "uptime": time.time()})
+
+              elif self.path == "/users":
+                  active = [u.to_dict() for u in _users.values() if u.active]
+                  self.send_json(200, {"users": active, "count": len(active)})
+
+              elif self.path.startswith("/users/"):
+                  try:
+                      uid = int(self.path.split("/")[-1])
+                  except ValueError:
+                      self.send_json(400, {"error": "invalid user id"})
+                      return
+                  user = _users.get(uid)
+                  if user and user.active:
+                      self.send_json(200, user.to_dict())
+                  else:
+                      self.send_json(404, {"error": "user not found"})
+              else:
+                  self.send_json(404, {"error": "not found"})
+
+          def do_POST(self) -> None:
+              global _next_id
+              if self.path != "/users":
+                  self.send_json(404, {"error": "not found"})
+                  return
+              length = int(self.headers.get("Content-Length", 0))
+              body = json.loads(self.rfile.read(length))
+              user = User(id=_next_id, name=body["name"], email=body["email"],
+                          role=body.get("role", "member"))
+              _users[_next_id] = user
+              _next_id += 1
+              self.send_json(201, user.to_dict())
+
+      # ── Server bootstrap ──────────────────────────────────────────────────────────────────────────────────────
+
+      class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+          """Serve each request in a separate thread."""
+          daemon_threads = True
+
+      def main() -> None:
+          port = int(os.getenv("PORT", 8080))
+          server = ThreadedHTTPServer(("0.0.0.0", port), APIHandler)
+          logger.info("Listening on port %d", port)
+          try:
+              server.serve_forever()
+          except KeyboardInterrupt:
+              logger.info("Shutting down")
+              server.shutdown()
+
+      if __name__ == "__main__":
+          main()
+
+  # ── 3. Keypress: gg (go to top) — shown as NORMAL mode command ───────────
+  #    We simulate "keypress popups" with a title scene that shows the key
+  #    briefly, then cut back to the editor. In a more advanced build you'd
+  #    overlay this on the frame itself.
+  - type: title
+    text: "gg"
+    subtitle: "jump to top of file"
+    duration: 0.6
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 1
+    highlight_lines: [1, 2, 3]
+    duration: 1.2
+    pause_after: 0.0
+    content: *server
+
+  # ── 4. Keypress: G (go to bottom) ────────────────────────────────────────
+  - type: title
+    text: "G"
+    subtitle: "jump to end of file"
+    duration: 0.6
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 72
+    highlight_lines: [85, 86, 87]
+    duration: 1.5
+    pause_after: 0.0
+    content: *server
+
+  # ── 5. Scrolling up slowly — simulate Ctrl-U (half page up) ─────────────
+  - type: title
+    text: "Ctrl-U"
+    subtitle: "scroll half page up"
+    duration: 0.5
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 55
+    duration: 0.5
+    pause_after: 0.0
+    content: *server
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 38
+    duration: 0.5
+    pause_after: 0.0
+    content: *server
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 22
+    duration: 0.5
+    pause_after: 0.0
+    content: *server
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 1
+    duration: 0.8
+    pause_after: 0.3
+    content: *server
+
+  # ── 6. /search — jump to APIHandler class ────────────────────────────────
+  - type: title
+    text: "/APIHandler"
+    subtitle: "search forward"
+    duration: 0.7
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 44
+    highlight_lines: [47]
+    duration: 1.8
+    pause_after: 0.3
+    content: *server
+
+  # ── 7. Enter INSERT mode and add a new method ────────────────────────────
+  - type: title
+    text: "o"
+    subtitle: "open new line below, enter INSERT mode"
+    duration: 0.6
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: INSERT
+    start_line: 44
+    highlight_lines: [67]
+    duration: 2.5
+    pause_after: 0.3
+    content: |
+      #!/usr/bin/env python3
+      """
+      Minimal async HTTP API server.
+      Handles /health, /users, and /users/<id> routes.
+      Long lines ahead to demonstrate text wrapping in the editor viewport.
+      """
+      from __future__ import annotations
+
+      import asyncio
+      import json
+      import logging
+      import os
+      import time
+      from dataclasses import dataclass, field, asdict
+      from typing import Any, Optional
+      from http.server import BaseHTTPRequestHandler, HTTPServer
+      from socketserver import ThreadingMixIn
+
+      logger = logging.getLogger(__name__)
+      logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+      # ── Data layer ────────────────────────────────────────────────────────────────────────────────────────────
+      # In production you'd replace these in-memory stores with a real database connection (Postgres, SQLite, etc.)
+
+      @dataclass
+      class User:
+          id: int
+          name: str
+          email: str
+          role: str = "member"
+          created_at: float = field(default_factory=time.time)
+          active: bool = True
+
+          def to_dict(self) -> dict[str, Any]:
+              return asdict(self)
+
+      _users: dict[int, User] = {
+          1: User(id=1, name="Alice Nakamura",  email="alice@example.com",  role="admin"),
+          2: User(id=2, name="Bob Osei-Bonsu",  email="bob@example.com",    role="member"),
+          3: User(id=3, name="Carol Reyes",     email="carol@example.com",  role="member"),
+          4: User(id=4, name="Dave Petrov",     email="dave@example.com",   role="member"),
+      }
+      _next_id: int = 5
+
+      # ── Request handler ───────────────────────────────────────────────────────────────────────────────────────
+
+      class APIHandler(BaseHTTPRequestHandler):
+          """Handle incoming HTTP requests and route them to the correct method."""
+
+          def log_message(self, fmt: str, *args: Any) -> None:  # silence default httpd logging
+              logger.info(fmt % args)
+
+          def send_json(self, status: int, data: Any) -> None:
+              body = json.dumps(data, indent=2).encode()
+              self.send_response(status)
+              self.send_header("Content-Type", "application/json")
+              self.send_header("Content-Length", str(len(body)))
+              self.end_headers()
+              self.wfile.write(body)
+
+          def do_DELETE(self) -> None:
+              """Soft-delete a user by setting active=False."""
+              if not self.path.startswith("/users/"):
+                  self.send_json(404, {"error": "not found"})
+                  return
+              try:
+                  uid = int(self.path.split("/")[-1])
+              except ValueError:
+                  self.send_json(400, {"error": "invalid user id"})
+                  return
+              user = _users.get(uid)
+              if user and user.active:
+                  user.active = False
+                  self.send_json(200, {"deleted": uid})
+              else:
+                  self.send_json(404, {"error": "user not found"})
+
+          def do_GET(self) -> None:
+              if self.path == "/health":
+                  self.send_json(200, {"status": "ok", "uptime": time.time()})
+
+              elif self.path == "/users":
+                  active = [u.to_dict() for u in _users.values() if u.active]
+                  self.send_json(200, {"users": active, "count": len(active)})
+
+              elif self.path.startswith("/users/"):
+                  try:
+                      uid = int(self.path.split("/")[-1])
+                  except ValueError:
+                      self.send_json(400, {"error": "invalid user id"})
+                      return
+                  user = _users.get(uid)
+                  if user and user.active:
+                      self.send_json(200, user.to_dict())
+                  else:
+                      self.send_json(404, {"error": "user not found"})
+              else:
+                  self.send_json(404, {"error": "not found"})
+
+          def do_POST(self) -> None:
+              global _next_id
+              if self.path != "/users":
+                  self.send_json(404, {"error": "not found"})
+                  return
+              length = int(self.headers.get("Content-Length", 0))
+              body = json.loads(self.rfile.read(length))
+              user = User(id=_next_id, name=body["name"], email=body["email"],
+                          role=body.get("role", "member"))
+              _users[_next_id] = user
+              _next_id += 1
+              self.send_json(201, user.to_dict())
+
+      # ── Server bootstrap ──────────────────────────────────────────────────────────────────────────────────────
+
+      class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+          """Serve each request in a separate thread."""
+          daemon_threads = True
+
+      def main() -> None:
+          port = int(os.getenv("PORT", 8080))
+          server = ThreadedHTTPServer(("0.0.0.0", port), APIHandler)
+          logger.info("Listening on port %d", port)
+          try:
+              server.serve_forever()
+          except KeyboardInterrupt:
+              logger.info("Shutting down")
+              server.shutdown()
+
+      if __name__ == "__main__":
+          main()
+
+  # ── 8. Back to NORMAL with Escape ────────────────────────────────────────
+  - type: title
+    text: "Esc"
+    subtitle: "back to NORMAL mode"
+    duration: 0.5
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 44
+    highlight_lines: [67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77]
+    duration: 1.5
+    pause_after: 0.3
+    content: *server
+
+  # ── 9. VISUAL LINE mode — select a block ─────────────────────────────────
+  - type: title
+    text: "V"
+    subtitle: "enter VISUAL LINE mode"
+    duration: 0.5
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: VISUAL
+    start_line: 33
+    highlight_lines: [37, 38, 39, 40, 41, 42]
+    duration: 2.0
+    pause_after: 0.3
+    content: *server
+
+  # ── 10. Yank selection ────────────────────────────────────────────────────
+  - type: title
+    text: "y"
+    subtitle: "yank (copy) selected lines"
+    duration: 0.5
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 33
+    highlight_lines: [37, 38, 39, 40, 41, 42]
+    duration: 1.2
+    pause_after: 0.3
+    content: *server
+
+  # ── 11. COMMAND mode — :wq ────────────────────────────────────────────────
+  - type: title
+    text: ":wq"
+    subtitle: "write and quit"
+    duration: 0.7
+    pause_after: 0.0
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: COMMAND
+    start_line: 44
+    duration: 1.5
+    pause_after: 0.3
+    content: *server
+
+  # ── 12. Back to shell after saving ────────────────────────────────────────
+  - type: shell
+    prompt_user: dev
+    prompt_host: box
+    prompt_path: "~/projects/api"
+    commands:
+      - input: "python server.py &"
+        output: "[1] 18423"
+        delay_after: 0.4
+      - input: "curl -s localhost:8080/health | python -m json.tool"
+        output: |
+          {
+              "status": "ok",
+              "uptime": 1713520800.431
+          }
+        lang: json
+      - input: "curl -s localhost:8080/users | python -m json.tool"
+        output: |
+          {
+              "users": [
+                  {"id": 1, "name": "Alice Nakamura",  "email": "alice@example.com", "role": "admin",  "active": true},
+                  {"id": 2, "name": "Bob Osei-Bonsu",  "email": "bob@example.com",   "role": "member", "active": true},
+                  {"id": 3, "name": "Carol Reyes",     "email": "carol@example.com", "role": "member", "active": true},
+                  {"id": 4, "name": "Dave Petrov",     "email": "dave@example.com",  "role": "member", "active": true}
+              ],
+              "count": 4
+          }
+        lang: json
+        delay_after: 1.0
+
+  # ── 13. Split pane: editor (left) + running server log (right) ───────────
+  #    The split scene renders both panes in the same window.
+  - type: split
+    direction: horizontal
+    title: "vim split demo"
+    panes:
+      - type: editor
+        mode: vim
+        filename: "server.py"
+        vim_mode: NORMAL
+        start_line: 54
+        highlight_lines: [57, 58, 59]
+        duration: 4.0
+        content: *server
+
+      - type: shell
+        prompt_user: dev
+        prompt_host: box
+        prompt_path: "~/projects/api"
+        commands:
+          - input: "curl -X DELETE localhost:8080/users/2"
+            output: '{"deleted": 2}'
+            lang: json
+          - input: "curl -s localhost:8080/users/2"
+            output: '{"error": "user not found"}'
+            lang: json
+
+  # ── 14. Dracula theme showcase — same file, different look ────────────────
+  - type: title
+    text: "dracula theme"
+    subtitle: "same file, different colour scheme"
+    duration: 1.5
+    theme_override: dracula
+    pause_after: 0.3
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    theme_override: dracula
+    start_line: 1
+    highlight_lines: [8, 9, 10, 11, 12, 13, 14, 15]
+    duration: 3.0
+    content: *server
+
+  # ── 15. Gruvbox theme showcase ────────────────────────────────────────────
+  - type: title
+    text: "gruvbox theme"
+    subtitle: ""
+    duration: 1.2
+    theme_override: gruvbox
+    pause_after: 0.2
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: INSERT
+    theme_override: gruvbox
+    start_line: 22
+    highlight_lines: [24, 25, 26, 27, 28, 29]
+    duration: 3.0
+    content: *server
+
+  # ── 16. Long line / text wrapping demo ───────────────────────────────────
+  - type: title
+    text: "long lines"
+    subtitle: "white-space: pre-wrap in action"
+    duration: 1.5
+    pause_after: 0.2
+
+  - type: editor
+    mode: vim
+    filename: "server.py"
+    vim_mode: NORMAL
+    start_line: 19
+    highlight_lines: [20, 21]
+    duration: 3.5
+    content: *server
+
+  # ── 17. Nord theme + editor with a Rust file ─────────────────────────────
+  - type: title
+    text: "nord theme · rust"
+    subtitle: ""
+    duration: 1.2
+    theme_override: nord
+    pause_after: 0.2
+
+  - type: editor
+    mode: vim
+    filename: "main.rs"
+    vim_mode: NORMAL
+    theme_override: nord
+    start_line: 1
+    highlight_lines: [10, 11, 12, 13]
+    duration: 4.0
+    content: |
+      use std::collections::HashMap;
+      use std::sync::{Arc, Mutex};
+
+      #[derive(Debug, Clone)]
+      pub struct User {
+          pub id: u64,
+          pub name: String,
+          pub email: String,
+          pub role: Role,
+          pub active: bool,
+      }
+
+      #[derive(Debug, Clone, PartialEq)]
+      pub enum Role {
+          Admin,
+          Member,
+          Guest,
+      }
+
+      pub type UserStore = Arc<Mutex<HashMap<u64, User>>>;
+
+      pub fn new_store() -> UserStore {
+          Arc::new(Mutex::new(HashMap::new()))
+      }
+
+      pub fn insert_user(store: &UserStore, user: User) -> u64 {
+          let id = user.id;
+          store.lock().unwrap().insert(id, user);
+          id
+      }
+
+      pub fn get_user(store: &UserStore, id: u64) -> Option<User> {
+          store.lock().unwrap().get(&id).cloned()
+      }
+
+      pub fn delete_user(store: &UserStore, id: u64) -> bool {
+          let mut map = store.lock().unwrap();
+          if let Some(u) = map.get_mut(&id) {
+              u.active = false;
+              true
+          } else {
+              false
+          }
+      }
+
+      #[cfg(test)]
+      mod tests {
+          use super::*;
+
+          fn make_user(id: u64) -> User {
+              User {
+                  id,
+                  name: format!("user_{}", id),
+                  email: format!("user_{}@example.com", id),
+                  role: Role::Member,
+                  active: true,
+              }
+          }
+
+          #[test]
+          fn test_insert_and_get() {
+              let store = new_store();
+              let u = make_user(1);
+              insert_user(&store, u.clone());
+              assert_eq!(get_user(&store, 1).unwrap().name, "user_1");
+          }
+
+          #[test]
+          fn test_soft_delete() {
+              let store = new_store();
+              insert_user(&store, make_user(2));
+              assert!(delete_user(&store, 2));
+              assert!(!get_user(&store, 2).unwrap().active);
+          }
+      }
+
+  # ── 18. Catppuccin + Python REPL round-off ────────────────────────────────
+  - type: title
+    text: "catppuccin mocha"
+    subtitle: "closing with a REPL session"
+    duration: 1.2
+    theme_override: catppuccin-mocha
+    pause_after: 0.2
+
+  - type: repl
+    repl: python
+    title: "Python 3.12"
+    theme_override: catppuccin-mocha
+    commands:
+      - input: "from server import _users, User"
+      - input: "len(_users)"
+        output: "4"
+      - input: "[u.name for u in _users.values()]"
+        output: "['Alice Nakamura', 'Bob Osei-Bonsu', 'Carol Reyes', 'Dave Petrov']"
+      - input: "admin = next(u for u in _users.values() if u.role == 'admin')"
+      - input: "admin"
+        output: "User(id=1, name='Alice Nakamura', email='alice@example.com', role='admin', created_at=1713520800.0, active=True)"
+        delay_after: 1.5
